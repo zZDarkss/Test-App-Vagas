@@ -25,6 +25,33 @@ const loadScript = (src, onLoad) => {
   document.head.appendChild(script);
 };
 
+import { db } from './firebaseConfig'; // Importa a conexão
+import { collection, onSnapshot } from "firebase/firestore";
+
+// Dentro do seu componente App
+useEffect(() => {
+  // 'vagas' é o nome da sua coleção no Firestore
+  const colecaoVagas = collection(db, 'vagas');
+
+  // onSnapshot escuta as alterações em tempo real
+  const unsubscribe = onSnapshot(colecaoVagas, (snapshot) => {
+    const vagasDoDb = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    setVagas(vagasDoDb); // Atualiza o estado do seu componente
+    setIsLoading(false);
+  });
+
+  // Limpa o listener quando o componente é desmontado
+  return () => unsubscribe();
+}, []);
+
+import { doc, updateDoc } from "firebase/firestore";
+
+const handleStatusChange = async (idDaVaga, newStatus) => {
+  const vagaDocRef = doc(db, 'vagas', idDaVaga); // Pega a referência do documento
+  await updateDoc(vagaDocRef, {
+    statusTarefa: newStatus // Atualiza apenas o campo necessário
+  });
+};
 
 // --- Constantes e Configurações ---
 const STATUS_OPTIONS = ['Todos', 'Disponível', 'Carregando', 'Aduana', 'Atrasado']; 
