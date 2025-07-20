@@ -25,17 +25,6 @@ const loadScript = (src, onLoad) => {
   document.head.appendChild(script);
 };
 
-// --- Dados de Exemplo ---
-const dadosIniciaisExemplo = [
-  { Rota: "B12_PM7", Vaga: 1, Onda: 1, Transportadora: "COOPMETRO"},
-  { Rota: "B13_PM7", Vaga: 2, Onda: 1, Transportadora: "COOPMETRO"},
-  { Rota: "F10_PM7", Vaga: 1, Onda: 2, Transportadora: "ECO EXPRESS"},
-  { Rota: "F17_PM7", Vaga: 2, Onda: 2, Transportadora: "Entrevias Expres"},
-  { Rota: "F1_PM7", Vaga: 1, Onda: 3, Transportadora: "Entrevias Expres"},
-  { Rota: "A05_PM7", Vaga: 3, Onda: 1, Transportadora: "MELI"},
-  { Rota: "A06_PM7", Vaga: 4, Onda: 1, Transportadora: "MELI"},
-  { Rota: "C20_PM7", Vaga: 5, Onda: 2, Transportadora: "Rodacoop"},
-];
 
 // --- Constantes e Configurações ---
 const STATUS_OPTIONS = ['Todos', 'Disponível', 'Carregando', 'Aduana', 'Atrasado']; 
