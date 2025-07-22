@@ -207,6 +207,7 @@ const RelatorioView = ({ vagas }) => {
 
 const App = () => {
   const [vagas, setVagas] = useState([]);
+  const [todasAsVagas, setTodasAsVagas] = useState([]);
   const [filtroStatus, setFiltroStatus] = useState('Todos');
   const [filtroOnda, setFiltroOnda] = useState('Todas');
   const [filtroTransportadora, setFiltroTransportadora] = useState('Todas');
@@ -240,14 +241,13 @@ const App = () => {
   const [selectedCarrier, setSelectedCarrier] = useState(null);
   const fileInputRef = useRef(null);
 
-  const [tmcConfig, setTmcConfig] = useState({ 1: 30, 2: 30, 3: 30, 4: 30, 5: 30, 6: 30, 7: 30, 8: 30 });
-  const vagasRef = useRef(vagas);
-  vagasRef.current = vagas;
+  // Estados para a funcionalidade de TMC
+  const [tmcConfig, setTmcConfig] = useState({ 1: 20, 2: 20, 3: 20, 4: 20, 5: 20, 6: 20, 7: 20, 8: 20 });
   
+  // useEffect para buscar dados do Firebase e monitorar TMC
   useEffect(() => {
-    // onSnapshot para vagas
-    // ATENÇÃO: Esta query agora pega TODAS as vagas. A filtragem para "ativas" é feita na VagasView.
-    const q = query(collection(db, 'vagas'), orderBy('Onda'), orderBy('Vaga'));
+    setIsLoading(true);
+    const q = query(collection(db, 'vagas'), orderBy('posicaoNaTela'));
     
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
       const vagasDoBanco = querySnapshot.docs.map(doc => {
@@ -257,6 +257,10 @@ const App = () => {
         }
         return { id: doc.id, ...data };
       });
+      
+      setTodasAsVagas(vagasDoBanco);
+      const vagasAtivas = vagasDoBanco.filter(v => v.ativa);
+      setVagas(vagasAtivas);
 
       const ondas = new Set(['Todas']);
       const transportadoras = new Set(['Todas']);
@@ -264,10 +268,9 @@ const App = () => {
         if(vaga.Onda) ondas.add(vaga.Onda);
         if(vaga.Transportadora) transportadoras.add(vaga.Transportadora);
       });
-
-      setVagas(vagasDoBanco);
       setOpcoesOnda(Array.from(ondas).sort((a,b) => (a === 'Todas' ? -1 : b === 'Todas' ? 1 : a-b)));
       setOpcoesTransportadora(Array.from(transportadoras).sort());
+      
       setIsLoading(false);
     }, (error) => {
         console.error("Erro no listener do Firestore: ", error);
@@ -276,79 +279,55 @@ const App = () => {
     
     loadScript("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js", () => setIsLibReady(true));
     
-    const tmcInterval = setInterval(() => {
-      const currentVagas = vagasRef.current; // Usa a ref para ter a lista mais atual
-      const agora = new Date();
-      currentVagas.forEach(vaga => {
-        if ((vaga.statusTarefa === 'Carregando' || vaga.statusTarefa === 'Aduana') && vaga.inicioCarregamentoTimestamp && !vaga.tmcPerdido) {
-          const tempoLimiteEmMinutos = tmcConfig[vaga.Onda] || 30;
-          const tempoLimiteEmMs = tempoLimiteEmMinutos * 60 * 1000;
-          const inicioCarregamento = new Date(vaga.inicioCarregamentoTimestamp);
-          const tempoDecorrido = agora.getTime() - inicioCarregamento.getTime();
-
-          if (tempoDecorrido > tempoLimiteEmMs) {
-            const vagaDocRef = doc(db, 'vagas', vaga.id);
-            updateDoc(vagaDocRef, { statusTarefa: 'Atrasado', tmcPerdido: true });
-            registrarHistorico(`Vaga ${vaga.Vaga} (${vaga.Rota}) perdeu TMC`);
-          }
-        }
-      });
-    }, 30000);
-
+    // ... (lógica do tmcInterval aqui, se aplicável)
+    
     return () => {
       unsubscribe();
-      clearInterval(tmcInterval);
+      // clearInterval(tmcInterval);
     };
   }, [tmcConfig]);
 
-  const registrarHistorico = (acao, detalhes = null) => { setHistoricoAlteracoes(prev => [{ acao, detalhes, timestamp: new Date() }, ...prev.slice(0, 99)]); };
+  // AQUI COMEÇAM SUAS OUTRAS FUNÇÕES (displayConfirmationModal, etc.)
   const displayConfirmationModal = (props) => setConfirmationModalProps({ show: true, ...props });
+  const registrarHistorico = (acao, detalhes = null) => { setHistoricoAlteracoes(prev => [{ acao, detalhes, timestamp: new Date() }, ...prev.slice(0, 99)]); };
 
   const processAndUploadToFirestore = async (data) => {
     setIsLoading(true);
-    displayConfirmationModal({ title: 'Aguarde', message: 'Limpando vagas antigas e subindo as novas...', type: 'info', onConfirm: ()=>setConfirmationModalProps({show:false}) });
+    // ... (início da função sem alteração)
     
-    // Lógica aprimorada para encontrar a primeira onda
-    const ondasValidas = data.map(item => parseInt(item.Onda || item.onda, 10)).filter(Number.isFinite);
-    let primeiraOnda = null;
-    let usarSistemaDeOndas = false;
-
-    if (ondasValidas.length > 0) {
-      primeiraOnda = Math.min(...ondasValidas);
-      usarSistemaDeOndas = true;
-    }
-
+    const primeiraOnda = Math.min(...data.map(item => parseInt(item.Onda || item.onda, 10)).filter(Number.isFinite));
     const vagasCollectionRef = collection(db, 'vagas');
     const batch = writeBatch(db);
-
-    // Limpa as vagas antigas
     const querySnapshot = await getDocs(vagasCollectionRef);
     querySnapshot.forEach(doc => batch.delete(doc.ref));
-
-    // Adiciona as novas vagas do arquivo
+    
     data.forEach(item => {
       const ondaAtual = parseInt(item.Onda || item.onda, 10);
+      const vagaNumero = parseInt(item.Vaga || item.vaga, 10); // Pega o número da Vaga
       const newVaga = {
         Rota: item.Rota || item.rota,
-        Vaga: parseInt(item.Vaga || item.vaga, 10),
-        Onda: ondaAtual || null, // Salva null se não houver onda
+        Vaga: vagaNumero,
+        Onda: ondaAtual,
         Transportadora: item.Transportadora || item.transportadora,
         statusTarefa: 'Disponível',
-        // ATUALIZADO: A vaga é ativa se não houver sistema de ondas, ou se pertencer à primeira onda
-        ativa: !usarSistemaDeOndas || ondaAtual === primeiraOnda,
+        ativa: ondaAtual === primeiraOnda,
+        
+        // --- ADIÇÃO IMPORTANTE ---
+        posicaoNaTela: vagaNumero, // Trava a posição visual com base no número da Vaga
+        // -------------------------
+
         tmcPerdido: false,
         inicioCarregamentoTimestamp: null
       };
-
-      if (!newVaga.Rota || isNaN(newVaga.Vaga)) return; // Ignora linhas inválidas
-      
+      if (!newVaga.Rota || isNaN(newVaga.Vaga)) return;
       const newDocRef = doc(vagasCollectionRef);
       batch.set(newDocRef, newVaga);
     });
 
+    // ... (final da função sem alteração)
     try {
       await batch.commit();
-      displayConfirmationModal({ title: 'Sucesso!', message: `Base de vagas atualizada com ${data.length} novas rotas.`, type: 'success', confirmText: 'Ok' });
+      displayConfirmationModal({ title: 'Sucesso!', message: `Base de vagas atualizada.`, type: 'success', confirmText: 'Ok' });
     } catch (error) {
       console.error("Erro ao atualizar o banco de dados: ", error);
       displayConfirmationModal({ title: 'Erro', message: 'Não foi possível atualizar a base de vagas.', type: 'error', confirmText: 'Ok' });
@@ -381,32 +360,60 @@ const App = () => {
   
   const handleFileUploadRequest = () => { if (isAdmin) fileInputRef.current?.click(); else { setAdminAttemptCallback(() => () => fileInputRef.current?.click()); setShowAdminPrompt(true); } };
 
+  // COLE ESTA NOVA FUNÇÃO AQUI
   const ativarProximaVaga = async (vagaConcluida) => {
-    const q = query(collection(db, "vagas"), where("Vaga", "==", vagaConcluida.Vaga), where("Onda", ">", vagaConcluida.Onda), orderBy("Onda"), limit(1));
+    // --- MARCADORES DE DEPURAÇÃO ---
+    console.log("--> Dentro de ativarProximaVaga. Buscando próxima vaga para:", vagaConcluida);
+    // --- FIM DOS MARCADORES ---
+    
+    const q = query(
+      collection(db, "vagas"),
+      where("Vaga", "==", vagaConcluida.Vaga),
+      where("Onda", ">", vagaConcluida.Onda),
+      orderBy("Onda"),
+      limit(1)
+    );
+
     const querySnapshot = await getDocs(q);
+    
+    // --- MARCADORES DE DEPURAÇÃO ---
+    console.log(`--> Foram encontradas ${querySnapshot.docs.length} vagas para a próxima onda.`);
+    // --- FIM DOS MARCADORES ---
+
     const batch = writeBatch(db);
     const vagaConcluidaRef = doc(db, "vagas", vagaConcluida.id);
     batch.update(vagaConcluidaRef, { ativa: false });
+
     if (!querySnapshot.empty) {
       const proximaVagaDoc = querySnapshot.docs[0];
+      console.log("--> Próxima vaga encontrada! Ativando:", proximaVagaDoc.data()); // MARCADOR
       batch.update(proximaVagaDoc.ref, { ativa: true });
+    } else {
+      console.log("--> Nenhuma vaga encontrada para a próxima onda."); // MARCADOR
     }
+
     await batch.commit();
+    console.log("--> Batch de ativação/desativação concluído."); // MARCADOR
   };
 
+  // ATUALIZADO: Funções de manipulação de status agora interagem com o Firestore
   const handleStatusChange = async (idDaVaga, newStatus) => {
     const vagaOriginal = vagas.find(v => v.id === idDaVaga);
     if (!vagaOriginal || vagaOriginal.statusTarefa === newStatus) return;
+
+    // --- MARCADORES DE DEPURAÇÃO ---
+    console.log("Status mudou. Vaga original:", vagaOriginal);
     const vagaFoiConcluida = (vagaOriginal.statusTarefa === 'Carregando' || vagaOriginal.statusTarefa === 'Aduana') && newStatus === 'Disponível';
+    console.log("A vaga foi considerada 'concluída'?", vagaFoiConcluida);
+    // --- FIM DOS MARCADORES ---
+
     const vagaDocRef = doc(db, 'vagas', idDaVaga);
-    const dadosParaAtualizar = { statusTarefa: newStatus };
-    if (newStatus === 'Carregando' && !vagaOriginal.inicioCarregamentoTimestamp) {
-      dadosParaAtualizar.inicioCarregamentoTimestamp = serverTimestamp();
-    }
     try {
-      await updateDoc(vagaDocRef, dadosParaAtualizar);
+      await updateDoc(vagaDocRef, { statusTarefa: newStatus });
       registrarHistorico(`Status Vaga ${vagaOriginal.Vaga} (${vagaOriginal.Rota}): ${vagaOriginal.statusTarefa} -> ${newStatus}`);
+      
       if (vagaFoiConcluida) {
+        console.log("--> Chamando ativarProximaVaga com:", vagaOriginal); // MARCADOR
         await ativarProximaVaga(vagaOriginal);
       }
     } catch (error) {
@@ -414,14 +421,34 @@ const App = () => {
     }
   };
 
-  const handleBulkStatusChange = async (newStatus) => {
-    if (selectedVagas.size === 0) { displayConfirmationModal({ title: 'Aviso', message: 'Nenhuma vaga selecionada.', type: 'info', confirmText: 'Ok' }); return; }
+   const handleBulkStatusChange = async (newStatus) => {
+    if (selectedVagas.size === 0) {
+      displayConfirmationModal({ title: 'Aviso', message: 'Nenhuma vaga selecionada.', type: 'info', confirmText: 'Ok' });
+      return;
+    }
+
+    // 1. Pega os objetos completos das vagas selecionadas
+    const vagasSelecionadas = todasAsVagas.filter(v => selectedVagas.has(v.id));
+
+    // 2. Identifica quais delas serão "concluídas" por esta ação
+    const vagasConcluidas = vagasSelecionadas.filter(vaga => 
+      (vaga.statusTarefa === 'Carregando' || vaga.statusTarefa === 'Aduana') && newStatus === 'Disponível'
+    );
+
+    // 3. Executa a atualização de status para todas as vagas
     const batch = writeBatch(db);
-    selectedVagas.forEach(id => {
-      const docRef = doc(db, 'vagas', id);
+    vagasSelecionadas.forEach(vaga => {
+      const docRef = doc(db, 'vagas', vaga.id);
       batch.update(docRef, { statusTarefa: newStatus });
     });
     await batch.commit();
+
+    // 4. O PASSO CHAVE: Ativa a próxima onda para cada vaga que foi concluída
+    if (vagasConcluidas.length > 0) {
+      // Usamos Promise.all para rodar as ativações em paralelo, o que é mais rápido
+      await Promise.all(vagasConcluidas.map(vaga => ativarProximaVaga(vaga)));
+    }
+
     registrarHistorico(`${selectedVagas.size} vagas alteradas para '${newStatus}' em lote.`);
     setSelectedVagas(new Set());
   };
@@ -568,12 +595,14 @@ const App = () => {
 
   const RotasView = () => {
     const transportadoras = opcoesTransportadora.filter(t => t !== 'Todas');
-    const rotasFiltradas = selectedCarrier ? vagas.filter(d => d.Transportadora === selectedCarrier) : [];
-    return (
-        <div className="p-4 bg-white rounded-lg shadow">
-            <div className="mb-6">
-                <h3 className="text-lg font-semibold text-gray-700 mb-3">Selecione uma Transportadora</h3>
-                <div className="flex flex-wrap gap-2">
+    // ATUALIZADO: usa 'todasAsVagas' em vez de 'vagas'
+    const rotasFiltradas = selectedCarrier ? todasAsVagas.filter(d => d.Transportadora === selectedCarrier) : [];
+
+  return (
+      <div className="p-4 bg-white rounded-lg shadow">
+          <div className="mb-6">
+              <h3 className="text-lg font-semibold text-gray-700 mb-3">Selecione uma Transportadora</h3>
+              <div className="flex flex-wrap gap-2">
                     {transportadoras.map((carrier, index) => (
                         <button key={`${carrier}-${index}`} onClick={() => setSelectedCarrier(carrier)} className={`px-4 py-2 rounded-md font-semibold transition-colors text-sm flex items-center gap-2 ${selectedCarrier === carrier ? 'bg-indigo-600 text-white shadow' : 'bg-gray-200 text-gray-800 hover:bg-gray-300'}`}>
                             <Truck size={16}/>{carrier}
@@ -704,7 +733,8 @@ const App = () => {
       <main className="flex-1 container mx-auto p-4 md:p-6">
         {currentView === 'vagas' && <VagasView />}
         {currentView === 'rotas' && <RotasView />}
-        {currentView === 'relatorio' && <RelatorioView vagas={vagas} />}
+        {/* ATUALIZADO: Passando a lista completa para o relatório */}
+        {currentView === 'relatorio' && <RelatorioView vagas={todasAsVagas} />}
       </main>
 
        <ModalComponent {...confirmationModalProps} 
